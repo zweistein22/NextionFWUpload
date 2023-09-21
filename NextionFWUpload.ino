@@ -14,6 +14,9 @@ void ErrorHandler(const char *msg);
 
 void setup() {
   firmware.bdebug=false;
+  // with bdebug==true there will be debug messages sent over the serial 
+  // port to the nextionEmulate device but no actual uploading is done.
+  // to use you must set bdebug=true also on the nextionEmulate project.
 }
 
 
