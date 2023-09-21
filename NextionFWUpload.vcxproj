@@ -89,6 +89,9 @@
     </ClCompile>
     <ClInclude Include="__vm\.NextionFWUpload.vsarduino.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Readme.md" />
+  </ItemGroup>
   <PropertyGroup>
     <DebuggerFlavor>VisualMicroDebugger</DebuggerFlavor>
   </PropertyGroup>
