@@ -5,8 +5,8 @@
 NeoICSerial nextion;
 NextionFirmware firmware(&nextion);
  
-#define NEXTIONBAUD 9600
-#define SERIALBAUD 115200
+
+#define SERIALBAUD 57600
 #define RETRIES 5
 
 void ErrorHandler(const char *msg);
@@ -28,12 +28,17 @@ bool initdone=false;
 long remaining=0;
 long bytesread=0;
 long btransferred = 0;
+
+
 void ErrorHandler(const char *msg){
   // set baud back to init baud rate?
     firmware.DebugOut(msg);
+    Serial.println(msg);
+    Serial.flush();
     Serial.end();
    indataloop=false;
    initdone=false;
+   delay(4000);
 }
 
 
@@ -114,22 +119,34 @@ void loop() {
     if(!initdone){
       initdone=true;
       
-      nextion.begin(NEXTIONBAUD);  // Start serial comunication at baud=9600
+     
       Serial.begin(SERIALBAUD);
+      Serial.setTimeout(500);
       delay(50);
     }
-     Serial.write("***START->");
-     int avail=0;
-     for(int i=0;i<RETRIES;i++){
-         avail=Serial.available();
-         if(avail>=4) break;
-         delay(50);
-     };
-     if(avail<4) return;
-     length=0;
-     int rv = Serial.readBytes((char *) &length,sizeof(long));
-     if(rv!=4) return;
+    bool testing = false;
+    if (!testing) {
+        
+         Serial.write("***START->");
+         int avail=0;
+         for(int i=0;i<RETRIES;i++){
+             avail=Serial.available();
+             if(avail>=4) break;
+             delay(50);
+         };
+         if(avail<4) return;
+
+         length=0;
+         int rv = Serial.readBytes((char *) &length,sizeof(long));
+         if(rv!=4) return;
+         
+    }
+    else {
+        length = 330428L;
+    }
+
      remaining=length;
+    
      bytesread=0;
      btransferred = 0;
      if(!firmware.upload_init(length,57600)) {

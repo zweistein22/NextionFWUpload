@@ -2,29 +2,43 @@
 
 int ARDUINOSERIALBUFFERSIZE = 64;
 
+volatile int tx_completed = 0;
+
+void TX_Complete() {
+
+    tx_completed = 1;
+}
+
   NextionFirmware::NextionFirmware(NeoICSerial *  nextion){
 
     _nextion=nextion;
-    string.reserve(80);
+   
   }
 
 uint32_t NextionFirmware::_baudrate; /*nextion serail baudrate*/
 uint32_t NextionFirmware::_fwsize; /*undownload byte of tft file*/
 uint32_t NextionFirmware::_download_baudrate; /*download baudrate*/
-String NextionFirmware::string =String("");
+char NextionFirmware::recv[180];
+int NextionFirmware::recv_len = 0;
 bool NextionFirmware::bdebug=true;
 long nuploaded=0;
 
-volatile int tx_completed=0;
-
-void TX_Complete(){
-
-  tx_completed=1;
+void NextionFirmware::SerialDbgRecv() {
+    Serial.println(recv);
+    for (int i = 0; i < recv_len; i++) {
+          Serial.print(recv[i], HEX);
+          if (i > 0) {
+              if (i % 8 == 0) Serial.print(" ");
+              if (i % 32 == 0) Serial.print("\r\n");
+          }
+    }
 }
+
+
 
 void NextionFirmware::DebugOut(const char *msg){
   if(!bdebug) return;
-  string = "DBG: " + String(msg);
+  String string = "DBG: " + String(msg);
   sendCommand(string.c_str());
   
 }
@@ -37,6 +51,25 @@ bool NextionFirmware::upload_init(uint32_t fwsize,uint32_t download_baudrate){
     {
        return 0;
     }
+    uint32_t newbaud = 9600;
+    if (_baudrate != newbaud) {
+        String cmd = "baud=";
+        cmd += String(newbaud);
+        sendCommand(cmd.c_str());
+        recvRetString(500, true);
+        //Serial.print("Setting baud to ");
+        //Serial.print(newbaud);
+        //Serial.print(" from ");
+        //Serial.println(_baudrate);
+        delay(500);
+
+        if (_getBaudrate() == 0)
+        {
+            return 0;
+        }
+    }
+    // we change to 4800 baud!
+    
     if(!_setDownloadBaudrate(_download_baudrate))
     {
         return 0;
@@ -46,14 +79,15 @@ bool NextionFirmware::upload_init(uint32_t fwsize,uint32_t download_baudrate){
 
 uint32_t NextionFirmware::_getBaudrate(void)
 {
-    uint32_t baudrate_array[7] = {115200,19200,57600,38400,9600,4800,2400};
+    uint32_t baudrate_array[7] = { 4800,9600,115200,19200,57600,38400,2400};
      
     for(uint8_t i = 0; i < 7; i++)
     {
         if(_searchBaudrate(baudrate_array[i]))
         {
             _baudrate = baudrate_array[i];
-          
+            //Serial.print("\r\nBaudrate=");
+            //Serial.println(_baudrate);
             break;
         }
     }
@@ -63,57 +97,83 @@ uint32_t NextionFirmware::_getBaudrate(void)
 
 bool NextionFirmware::_searchBaudrate(uint32_t baudrate)
 {
+    _nextion->end();
     _nextion->begin(baudrate);
-    sendCommand("");
+    _nextion->setTimeout(500);
+    sendCommand("DRAKJHSUYDGBNCJHGJKSHBDN");
+    send0Command();
+    recvRetString(500, true);
     sendCommand("connect");
-    string="";
-    recvRetString(string,500,true);  
-    DebugOut(string.c_str());
-    if(string.indexOf("comok") != -1)
-    {
-       return 1;
-    } 
-    return 0;
+    recvRetString(500, true);
+  
+    delay(110);
+    sendCommand("ÿÿ");
+    sendCommand("connect");
+    recvRetString(500, true);
+  
+    char* p = strstr(recv, "comok");
+     if(p==nullptr){
+           //Serial.println("comok expected.");
+        return false;
+    }
+    return true;
+
 }
+
+
+void NextionFirmware::send0Command() {
+    //while (_nextion->available()) { _nextion->read(); }
+    tx_completed = 0;
+    _nextion->attachTxCompleteInterrupt(TX_Complete);
+    _nextion->write((uint8_t)0x00);
+  
+    _nextion->write(0xFF); _nextion->write(0xFF); _nextion->write(0xFF);
+    //Serial.print("->0x00FFFFFF");
+    _nextion->flush();
+    while (tx_completed == 0) {
+        delay(50);
+    }
+    _nextion->detachTxCompleteInterrupt();
+   
+}
+
 
 void NextionFirmware::sendCommand(const char* cmd)
 {
-   
-    while (_nextion->available())
-    {
-        _nextion->read();
-    }
-    tx_completed=0;
+    //while (_nextion->available()) { _nextion->read(); }
+    tx_completed = 0;
     _nextion->attachTxCompleteInterrupt(TX_Complete);
+    //Serial.print("->");
+    //Serial.print(cmd);
     _nextion->write(cmd);
     _nextion->write(0xFF);_nextion->write(0xFF); _nextion->write(0xFF);
+    //Serial.print("0xFFFFFF");
     _nextion->flush();
-    while(tx_completed==0){
-      delay(50);
+    while (tx_completed == 0) {
+        delay(50);
     }
     _nextion->detachTxCompleteInterrupt();
+ 
 }
 
-uint16_t NextionFirmware::recvRetString(String &string, uint32_t timeout,bool recv_flag)
+uint16_t NextionFirmware::recvRetString( uint32_t timeout,bool ack_flag)
 {
     uint16_t ret = 0;
     uint8_t c = 0;
     long start;
     bool exit_flag = false;
     start = millis();
+    recv_len = 0;
     while (millis() - start <= timeout)
     {
         while (_nextion->available())
         {
             c = _nextion->read(); 
-            if(c == 0)
+            recv[recv_len++]= (char)c;
+           
+            if(ack_flag)
             {
-                continue;
-            }
-            string += (char)c;
-            if(recv_flag)
-            {
-                if(string.indexOf(0x05) != -1)
+                if(c == 0x05)
                 { 
                     exit_flag = true;
                 } 
@@ -124,38 +184,66 @@ uint16_t NextionFirmware::recvRetString(String &string, uint32_t timeout,bool re
             break;
         }
     }
-    ret = string.length();
-    return ret;
+    recv[recv_len] = 0;
+    /*Serial.print(" : ");
+    for (int j = 0; j < recv_len; j++) {
+        Serial.print((unsigned char)recv[j], HEX);
+    }
+    Serial.print("\r\n");
+    Serial.println(recv);
+    */
+    return recv_len;
 }
 
 bool NextionFirmware::_setDownloadBaudrate(uint32_t baudrate)
 {
-    static String cmd = String("");
-    cmd.reserve(80);
+    static String cmd = "";
+    cmd.reserve(70);
+    delay(100);
+    sendCommand("runmode=2");
+    delay(60);
+    //recvRetString(500, true);
+    sendCommand("print \"mystop_yesABC\"");
+   
+    recvRetString(500, true);
+  
+   
+    sendCommand("get sleepÿÿÿget dimÿÿÿget baudÿÿÿprints \"ABC\",0");
+    delay(500);
+    recvRetString(500, true);
+    //SerialDbgRecv();
+       
     static String filesize_str = String(_fwsize,10);
     static String baudrate_str = String(baudrate,10);
+
+
+      
     cmd = "whmi-wri ";
     cmd+=filesize_str;
-    cmd+= "," + baudrate_str + ",0";
-    sendCommand("");
+    cmd+= "," + baudrate_str + ",1";
+    sendCommand("00");
+
     sendCommand(cmd.c_str());
+    _nextion->flushOutput();
+    _nextion->end();
+    delay(100);
     _nextion->begin(baudrate);
-    //delay(50);
-    string="";
-    recvRetString(string,500,true);  // acknowledge in new baud rate
-    if(string.indexOf(0x05) != -1)
-    { 
+    _nextion->setTimeout(500);
+    
+  
+    recvRetString(500,true);  // acknowledge in new baud rate
+    if(strchr(recv,0x05)) { 
         return 1;
     } 
     return 0;
 }
 
 bool NextionFirmware::wait_acknowledge(Stream* stream) {
-    String tmp = "";
+   
     if (bdebug) return true;
-    recvRetString(tmp, 500, true);
-    if (tmp.indexOf(0x05) != -1) {
-      //  stream->write(0x05);
+    recvRetString( 500, true);
+    if (strchr(recv,0x05)) {
+        //stream->write(0x05);
         return true;
     }
     return false; 
@@ -174,7 +262,7 @@ long NextionFirmware::upload_chunk(Stream* stream,long bytes)
     if (bytes == 0) return 0;
 
    
-    string = "uploading : ";
+    static String string = "uploading : ";
 
     for(int i=0;i<bytes;i++){
        

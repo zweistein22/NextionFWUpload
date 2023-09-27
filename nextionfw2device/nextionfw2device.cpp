@@ -5,6 +5,20 @@
 #include <vector>
 #include <Windows.h>
 
+std::string string_to_hex(const std::string& input)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+
+    std::string output;
+    output.reserve(input.length() * 2);
+    for (unsigned char c : input)
+    {
+        output.push_back(hex_digits[c >> 4]);
+        output.push_back(hex_digits[c & 15]);
+    }
+    return output;
+}
+
 class SerialPort {
 public:
     SerialPort(const wchar_t* portName) {
@@ -41,23 +55,43 @@ public:
             throw std::runtime_error(reinterpret_cast<const char*>(lastError()));
         }
     }
-    bool devicewaitreadytoread(unsigned int timeout) {
+
+    unsigned int recvRetString(std::string& str, unsigned int timeout, bool recv_flag)
+    {
+
+        COMMTIMEOUTS        commtimeouts;
+
+        GetCommTimeouts(hSerial, &commtimeouts);
+
+        commtimeouts.ReadIntervalTimeout = MAXDWORD;
+        commtimeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
+        commtimeouts.ReadTotalTimeoutConstant = timeout;
+
+        SetCommTimeouts(hSerial, &commtimeouts);
+
+
         char c = 0;
-        unsigned int tstart = GetTickCount64();
-        do {
-           
-            try {
-                c = read();
-                //std::cout << c << std::endl;
-                unsigned int tcur = GetTickCount64();
-                if (tcur - tstart > timeout) throw std::runtime_error("timeout : device readytoread.");
+        try {
+            DWORD bytesRead;
+            char buffer[200] = { 0 };
+            if (!ReadFile(hSerial, buffer, 200, &bytesRead, nullptr)) {
+                throw std::runtime_error(reinterpret_cast<const char*>(lastError()));
             }
-            catch (const std::exception& e) {
-                std::cerr << "Error: " << e.what() << std::endl;
+            for (int i = 0; i < min(200, bytesRead); i++) {
+
+                str += (char)buffer[i];
             }
-        } while (c != 0x05);
-        return true;
+
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+        }
+
+        return str.length();
+
+
     }
+ 
     char read() {
         DWORD bytesRead;
         char buffer[1] = { 0 };
@@ -72,10 +106,14 @@ public:
         int chunks = size / chunksize;
         int remainder = size % chunksize;
         DWORD bytesWritten;
-        int timeout = 5000;
+        int timeout = 500;
         for (int i = 0; i < chunks; i++) {
-
-            devicewaitreadytoread(timeout);
+            std::string str = "";
+            recvRetString(str, timeout, true);
+            //std::cout << string_to_hex(str) << std::endl;
+            if (str.find(0x05) == -1) {
+                throw std::runtime_error("0x05 ak not received");
+            }
             if (!WriteFile(hSerial, (char*)data + (i * chunksize), static_cast<DWORD>(chunksize), &bytesWritten, nullptr)) {
                 throw std::runtime_error(reinterpret_cast<const char*>(lastError()));
             }
@@ -83,7 +121,13 @@ public:
         }
 
         if (remainder > 0) {
-            devicewaitreadytoread(timeout);
+           
+            std::string str = "";
+            recvRetString(str, timeout, true);
+            std::cout << string_to_hex(str) << std::endl;
+            if (str.find(0x05) == -1) {
+                throw std::runtime_error("0x05 ak not received");
+            }
             if (!WriteFile(hSerial, (char*)data + (chunks * chunksize), static_cast<DWORD>(remainder), &bytesWritten, nullptr)) {
                 throw std::runtime_error(reinterpret_cast<const char*>(lastError()));
             }
@@ -154,7 +198,7 @@ int wmain(int argc, wchar_t* argv[]){
         DCB dcbSerialParams = { 0 };
         dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
         GetCommState(serialPort.handle(), &dcbSerialParams);
-        dcbSerialParams.BaudRate = CBR_115200;  // CBR_9600;
+        dcbSerialParams.BaudRate = CBR_57600;  // CBR_9600;
         dcbSerialParams.ByteSize = 8;
         dcbSerialParams.StopBits = ONESTOPBIT;
         dcbSerialParams.Parity = NOPARITY;
@@ -163,11 +207,11 @@ int wmain(int argc, wchar_t* argv[]){
         }
 
         COMMTIMEOUTS timeouts;
-        timeouts.ReadIntervalTimeout = 50;
-        timeouts.ReadTotalTimeoutConstant = 10;
-        timeouts.ReadTotalTimeoutMultiplier = 10;
-        timeouts.WriteTotalTimeoutConstant = 50;
-        timeouts.WriteTotalTimeoutMultiplier = 10;
+        timeouts.ReadIntervalTimeout = MAXDWORD;
+        timeouts.ReadTotalTimeoutConstant = 500;
+        timeouts.ReadTotalTimeoutMultiplier = MAXDWORD;
+        timeouts.WriteTotalTimeoutConstant = 5000;
+        timeouts.WriteTotalTimeoutMultiplier = MAXDWORD;
 
         if (!SetCommTimeouts(serialPort.handle(), &timeouts)) {
             throw std::runtime_error("Error in SetCommTimeouts.");
@@ -195,14 +239,15 @@ int wmain(int argc, wchar_t* argv[]){
         std::cout << "upload.tft: " << size << " bytes." << std::endl;
 
         // Now send in 4096-byte chunks
-        long bytesWritten = 0;
+        uint32_t bytesWritten = 0;
+        uint32_t size32 = (uint32_t) size;
         char buffer[4096];
 
         if (size > 0) {
-            serialPort.write(&size, sizeof(size));
+            serialPort.write(&size32, sizeof(size32));
         }
 
-        Sleep(2000);
+        Sleep(7000);
         serialPort.flush();
 
         while (file.read(buffer, sizeof(buffer))) {
@@ -229,8 +274,8 @@ int wmain(int argc, wchar_t* argv[]){
         rv = 1;
     }
 
-    std::cout << "Enter a non-empty key + [enter] to exit." << std::endl;
-    char c;
-    std::cin >> c;
+    //std::cout << "Enter a non-empty key + [enter] to exit." << std::endl;
+    //char c;
+    //std::cin >> c;
     return rv;
 }
