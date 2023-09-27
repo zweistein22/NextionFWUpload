@@ -35,4 +35,9 @@
     <None Include="Readme.md" />
     <None Include=".gitignore" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="console.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
 </Project>

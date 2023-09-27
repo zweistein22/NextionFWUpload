@@ -93,6 +93,9 @@
     <None Include=".gitignore" />
     <None Include="Readme.md" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="console.png" />
+  </ItemGroup>
   <PropertyGroup>
     <DebuggerFlavor>VisualMicroDebugger</DebuggerFlavor>
   </PropertyGroup>
